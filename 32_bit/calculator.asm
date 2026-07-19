@@ -14,7 +14,6 @@
     int   80h
 %endmacro
 
-
 %macro exit_program 0 
 	mov   eax, 1
     xor   ebx, ebx
@@ -31,22 +30,28 @@ section .data
 
 	typed_nmbr_msg db 'The number you typed is: ',0
 	typed_nmbr_msg_len equ $ - typed_nmbr_msg 
-
-	test_msg db 'TEST MESSAGE, TEST MESSAGE!!!!!!!',0Ah,0
-	test_msg_len equ $ - test_msg 
-
-	
-	;negative_msg db 'NEGATIVE NUMBER DETECTED!!!!!!!',0Ah,0
-	;negative_msg_len equ $ - negative_msg 
+	typed_nmbr_msg_len equ $ - typed_nmbr_msg 
 
 	is_positive db 1
+	is_number db 0
 
-	my_number db 120
+	num_of_conv_vals db 0
+	limit_to_convert db 2
+
+	end_of_str_flag dd 0
+
+	should_sub db 0
+	should_add db 0
+	should_mul db 0
+	should_div db 0	
 
 	TRUE equ 1
 	FALSE equ 0
 
 	buffer:    times 201 db 0
+	inputed_nums: times 201 dd 0
+	
+	current_iteration db 0
 
 	;welcome_msg_buffer_len equ (str_welcome_len1 + str_temperature_len + str_energia_len + str_com_qual_len + str_module_status_len) - 6
 
@@ -61,8 +66,6 @@ section .bss
 
 	ustr resb 200
 
-	;welcome_msg_buffer resb welcome_msg_buffer_len
-
 section .text
 
 	print_number:
@@ -76,7 +79,7 @@ section .text
 		mov edi, buffer   		   ; <- load our buffer into ebx
     	                 
 		; if the number is positive, then jump to immediately converting it
-		mov esi, [is_positive]
+		movzx esi, byte [is_positive]
 		cmp esi, FALSE
 		jne .loop_push_stack
 
@@ -85,7 +88,6 @@ section .text
 		neg eax
 		mov [edi], '-'
 		inc edi
-		
 
 		.loop_push_stack:
 
@@ -131,6 +133,10 @@ section .text
 
 	conv_str_to_int:
 
+		mov edi, [should_sub]
+		mov edi, FALSE
+		mov [should_sub], edi
+
 		xor ebx, ebx
 		xor ecx, ecx
 		xor eax, eax
@@ -139,48 +145,188 @@ section .text
 		mov edi, TRUE 
 		mov [is_positive], edi
 
-		.nextchar: ; loop for going char by char until we find the end of the string
+		.nextchar: 
 
-			; the whole string is in esi, a single char is in the lower byte
-			; by loading a byte of esi into a 1 byte register we load a single char
-			mov bl, byte [esi]  ; load current char
+			.convert_digit:
 
+				; marks flag as positive
+				mov [is_number], FALSE
+				xor edi, edi
 
-			; if that char is a number and it zero, its the null terminator
-			cmp bl, 0 ; zero signifies the end of the string
-			je .end_nextchar
-
-			cmp bl, '-'
-			je .negative
-
-			; convert from ascii to number and compare it to 9 if its above the char was not a digit
-			sub bl, '0'			
-			jmp .positve
+				.conv_loop:
 						
-			.negative:
+					mov bl, byte [esi]  ; load current char	
+
+					; if that char is a number and it zero, its the null terminator
+					cmp bl, 0 ; zero signifies the end of the string
+					jne .convert
+
+					xor edi, edi
+					mov edi, TRUE
+					mov [end_of_str_flag], edi
+					xor edi, edi
+					jmp .end_loop
+
+					.convert:
+						
+						inc esi
+
+						sub bl, '0'	
+						cmp bl, 9
+						ja .end_loop
+
+						cmp bl, 0
+						jl .end_loop
+
+						; marks flag as positive
+						mov [is_number], TRUE
+						xor edi, edi
+			 				
+						;imul eax, eax, 10 multiplies the current value in EAX by 10 and stores the result back in EAX
+						imul eax, eax, 10
+
+						; since the converted digit is now in bl (lower portion of ebx)
+						; we can add ebx (which only contains the digit to eax) slowly building the stringh
+						add eax, ebx				
+						jmp .conv_loop
+
+				.end_loop:
+
+					; if it is a numer then up our num_of_conv_vals
+					; if not jump ahead and dont store it
+					movzx edi, byte [is_number]
+					cmp edi, TRUE
+					jne .end_store_number
+
+					; keeps track of how many times we converted a number
+					xor edi, edi
+					movzx edi, byte [num_of_conv_vals]
+					inc edi
+
+					;here	
+					mov [num_of_conv_vals], dl
+					xor edi, edi
+					
+					.store_number:
+
+						; increment the current iteration of the array
+
+						; store the number into the array	
+						movzx ecx, byte [current_iteration]
+						mov [inputed_nums + ecx*4], eax
+						xor eax, eax
+
+						; mark it as false now
+						movzx edi, byte [is_number]
+						mov edi, FALSE
+						mov [is_number], dl
+
+						xor ecx, ecx
+						movzx ecx, byte [current_iteration]
+						inc ecx
+						mov [current_iteration], cl
+					
+							
+					.end_store_number:
+
+					; increment esi so we use the next char (esi is pointer to string)
+					movzx edi, byte [should_sub]
+					cmp edi, TRUE
+					je .test
+					jne .end_test
+
+					.test:
+
+					movzx edi, byte [num_of_conv_vals]
+					cmp edi, 1
+					ja .sub_previous_and_current
 				
-				mov edi, FALSE 
+					.end_test:
+
+					cmp bl, 0 ; zero signifies the end of the string
+					je .end_nextchar
+
+					add bl, '0'
+
+					cmp bl, ' '
+					je .handle_whitespace
+
+					cmp bl, '-'
+					je .negative
+
+			.sub_previous_and_current:
+
+				xor eax, eax
+				xor edx, edx				
+				xor ecx, ecx
+				
+				movzx ecx, byte [current_iteration]
+				dec ecx
+				
+				dec ecx
+				mov eax, [inputed_nums + ecx*4]
+
+				inc ecx ; go back one unit into the array of converted numbers
+				mov edx, [inputed_nums + ecx*4]
+			
+				; result will now be in eax, which handle_whitespace will put it
+				; int the next location
+				sub eax, edx
+
+				cmp eax, 0
+				jnl .store_and_exit
+
+				xor edi, edi
 				mov [is_positive], edi
 
-				inc esi
-				jmp .nextchar	 
-
-
-			.positve:
-				cmp bl, 9
-				ja .error
+				.store_and_exit:
 				
-				;imul eax, eax, 10 multiplies the current value in EAX by 10 and stores the result back in EAX
-				imul eax, eax, 10
+				; store the number into the array	
+				movzx ecx, byte [current_iteration]
+				mov [inputed_nums + ecx*4], eax
+				xor eax, eax
+				inc ecx
+				mov [current_iteration], cl
+											
+				; set the flag to false
+				xor edi, edi
+				mov [should_sub], edi
 
-				; since the converted digit is now in bl (lower portion of ebx)
-				; we can add ebx (which only contains the digit to eax) slowly building the stringh
-				add eax, ebx
 
-				; increment esi so we use the next char (esi is pointer to string)
-				inc esi
+				xor edi, edi
+				mov edi, [end_of_str_flag]
+				cmp edi, TRUE
+				je .end_nextchar
+				
+				; return to the main loop
 				jmp .nextchar
 			
+			.handle_whitespace:
+
+				jmp .nextchar			
+						
+			.negative:
+
+				; marks the is number flag as false
+				mov edi, [is_number]
+				mov edi, FALSE
+				mov [is_number], edi
+				
+				cmp byte [esi], ' '
+				jne .mark_as_neg
+
+				mov edi, [should_sub]
+				mov edi, TRUE
+				mov [should_sub], edi
+				jmp .nextchar
+
+				.mark_as_neg:
+						
+					mov edi, FALSE 
+					mov [is_positive], edi
+
+					jmp .nextchar	
+					 
 			.error:
 	
 				mov edi, -1
@@ -188,57 +334,69 @@ section .text
 
 		.end_nextchar:
 
-			ret
+			xor ecx, ecx
+			movzx ecx, byte [current_iteration]
+			dec ecx ; dec due to difference of position x lenght of arrays
 
+			mov eax, [inputed_nums + ecx*4]
 
-	check_u_input:
-
-		.check_number:
-					
-			; call read and pass our string and lenght	
-			read_stdin ustr, 200
-			
-			; ecx = ptr to buffer (beggining of the string) eax = number of bytes read (doing this equation gives us str lenght)
-			mov byte [ecx + eax - 1], 0 ; <- null terminate the ustr by replacing \n with 0
-
-			; mov the user input to esi and call conv_str_to_int
-			; to convert it into a number not a string
-			mov esi, ustr
-			call conv_str_to_int
-
-			; compare conv_str_to_int return value
-			mov ebx, -1
-			; if edi is not -1, but instead of a converted positive nubmer, goto valid 
-			cmp edi, ebx
-			jne .valid 
-						
-			; if not digit, tell user input was not valid, and iterate again
-			print_str str_input_not_number, str_input_not_number_len
-
-			jmp .check_number
-	
-		.valid: 
-		
-			; if its not positive
-			; make the number actually negative
-			mov edi, [is_positive]
+			movzx edi, byte [is_positive]
 			cmp edi, FALSE
-
-			mov [u_n1], eax  ; store the conveted number into u_n1
-			je .convert_to_neg
+			jne .exit
 			
-			;print_str test_msg, test_msg_len
-			ret
-			
-			.convert_to_neg:
+			.neg_number:
 
-				mov esi, [u_n1]	
-				neg esi
-				mov [u_n1], esi  ; store the conveted number into u_n1
-				;print_str negative_msg, negative_msg_len
+				cmp eax, 0
+				jl .exit
+
+				neg eax
+			.exit:
+			
+			xor edi, edi
 			ret
 
 
+	check_u_expression:
+
+		; clear all registers for use
+		xor ecx, ecx
+		xor eax, eax
+		xor ebx, ebx
+		xor esi, esi
+		xor edi, edi 
+		xor edx, edx
+					
+			.check_number:
+						
+				; call read and pass our string and lenght	
+				read_stdin ustr, 200
+				
+				; ecx = ptr to buffer (beggining of the string) eax = number of bytes read (doing this equation gives us str lenght)
+				mov byte [ecx + eax - 1], 0 ; <- null terminate the ustr by replacing \n with 0
+
+				; mov the user input to esi and call conv_str_to_int
+				; to convert it into a number not a string
+				mov esi, ustr
+				call conv_str_to_int
+
+				; compare conv_str_to_int return value
+				mov ebx, -1
+				; if edi is not -1, but instead of a converted positive nubmer, goto valid 
+				cmp edi, ebx
+				jne .valid 
+							
+				; if not digit, tell user input was not valid, and iterate again
+				print_str str_input_not_number, str_input_not_number_len
+
+				jmp .check_number
+		
+			.valid: 
+			
+				mov [u_n1], eax										
+			
+		.end_check_u_expression:
+			
+			ret
 
 global _start
 
@@ -246,31 +404,9 @@ _start:
 	
 	print_str str_welcome1, str_welcome_len1
 	
-	call check_u_input
+	call check_u_expression
 
-	print_str typed_nmbr_msg, typed_nmbr_msg_len
 	mov eax, [u_n1]
 	call print_number
 
-
 	exit_program
-
-
-; TODO:
-; DONE: make print_number correctly print negative numbers (rn it prints them as postive) 
-
- 
-	;mov edi, welcome_msg_buffer
-	;mov esi, str_welcome1
-	;mov ecx, str_welcome_len1 - 1
-	;rep movsb
-	;mov byte [edi], 0 ; < null terminator
-
-	;mov ecx, welcome_msg_buffer
-	;mov edx, welcome_msg_buffer_len
-	;print_string ecx, edx
-
-	;greet_user:
-		
-		;mov ecx, str_welcome1
-		;mov edx, str_welcome_len1
