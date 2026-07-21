@@ -30,12 +30,12 @@ section .data
 
 	typed_nmbr_msg db 'The number you typed is: ',0
 	typed_nmbr_msg_len equ $ - typed_nmbr_msg 
-	typed_nmbr_msg_len equ $ - typed_nmbr_msg 
+
 
 	is_positive db 1
 	is_number db 0
 
-	num_of_conv_vals db 0
+	;num_of_conv_vals dd 0
 	limit_to_convert db 2
 
 	end_of_str_flag dd 0
@@ -79,9 +79,8 @@ section .text
 		mov edi, buffer   		   ; <- load our buffer into ebx
     	                 
 		; if the number is positive, then jump to immediately converting it
-		movzx esi, byte [is_positive]
-		cmp esi, FALSE
-		jne .loop_push_stack
+		cmp eax, 0
+		jnl .loop_push_stack
 
 		; if not positive, make it positve as the rest of the code only works with positve integers, then
 		; add a '-' at the start of the string, because the number is meant to be negative
@@ -143,7 +142,7 @@ section .text
 		xor edi, edi
 
 		mov edi, TRUE 
-		mov [is_positive], edi
+		mov byte [is_positive], 1
 
 		.nextchar: 
 
@@ -162,8 +161,7 @@ section .text
 					jne .convert
 
 					xor edi, edi
-					mov edi, TRUE
-					mov [end_of_str_flag], edi
+					mov byte [end_of_str_flag], TRUE
 					xor edi, edi
 					jmp .end_loop
 
@@ -179,7 +177,7 @@ section .text
 						jl .end_loop
 
 						; marks flag as positive
-						mov [is_number], TRUE
+						mov byte [is_number], 1
 						xor edi, edi
 			 				
 						;imul eax, eax, 10 multiplies the current value in EAX by 10 and stores the result back in EAX
@@ -192,25 +190,29 @@ section .text
 
 				.end_loop:
 
-					; if it is a numer then up our num_of_conv_vals
 					; if not jump ahead and dont store it
 					movzx edi, byte [is_number]
 					cmp edi, TRUE
 					jne .end_store_number
 
-					; keeps track of how many times we converted a number
-					xor edi, edi
-					movzx edi, byte [num_of_conv_vals]
-					inc edi
 
-					;here	
-					mov [num_of_conv_vals], dl
-					xor edi, edi
-					
 					.store_number:
 
 						; increment the current iteration of the array
+						xor edi, edi
+						movzx edi, byte [is_positive]
+						cmp edi, FALSE
+						jne .store
+						
+					.neg_number:
 
+						cmp eax, 0
+						jl .store
+						neg eax
+						mov byte [is_positive], 1
+							
+					.store:
+					
 						; store the number into the array	
 						movzx ecx, byte [current_iteration]
 						mov [inputed_nums + ecx*4], eax
@@ -221,27 +223,19 @@ section .text
 						mov edi, FALSE
 						mov [is_number], dl
 
+						; increase the current iteration
 						xor ecx, ecx
 						movzx ecx, byte [current_iteration]
 						inc ecx
 						mov [current_iteration], cl
-					
-							
+
+						; if we should sub the current value with the current one, do it
+						movzx edi, byte [should_sub]
+						cmp edi, TRUE
+						je .sub_previous_and_current
+						
 					.end_store_number:
 
-					; increment esi so we use the next char (esi is pointer to string)
-					movzx edi, byte [should_sub]
-					cmp edi, TRUE
-					je .test
-					jne .end_test
-
-					.test:
-
-					movzx edi, byte [num_of_conv_vals]
-					cmp edi, 1
-					ja .sub_previous_and_current
-				
-					.end_test:
 
 					cmp bl, 0 ; zero signifies the end of the string
 					je .end_nextchar
@@ -273,12 +267,6 @@ section .text
 				; int the next location
 				sub eax, edx
 
-				cmp eax, 0
-				jnl .store_and_exit
-
-				xor edi, edi
-				mov [is_positive], edi
-
 				.store_and_exit:
 				
 				; store the number into the array	
@@ -291,7 +279,6 @@ section .text
 				; set the flag to false
 				xor edi, edi
 				mov [should_sub], edi
-
 
 				xor edi, edi
 				mov edi, [end_of_str_flag]
@@ -308,22 +295,20 @@ section .text
 			.negative:
 
 				; marks the is number flag as false
-				mov edi, [is_number]
-				mov edi, FALSE
+				xor edi, edi
 				mov [is_number], edi
 				
 				cmp byte [esi], ' '
 				jne .mark_as_neg
 
-				mov edi, [should_sub]
-				mov edi, TRUE
-				mov [should_sub], edi
+
+				mov byte [should_sub], TRUE
 				jmp .nextchar
 
 				.mark_as_neg:
 						
-					mov edi, FALSE 
-					mov [is_positive], edi
+					xor edi, edi
+					mov byte [is_positive], 0
 
 					jmp .nextchar	
 					 
@@ -339,18 +324,6 @@ section .text
 			dec ecx ; dec due to difference of position x lenght of arrays
 
 			mov eax, [inputed_nums + ecx*4]
-
-			movzx edi, byte [is_positive]
-			cmp edi, FALSE
-			jne .exit
-			
-			.neg_number:
-
-				cmp eax, 0
-				jl .exit
-
-				neg eax
-			.exit:
 			
 			xor edi, edi
 			ret
