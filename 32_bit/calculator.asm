@@ -32,6 +32,22 @@ section .data
 	typed_nmbr_msg_len equ $ - typed_nmbr_msg 
 
 
+
+
+	scale dq 1000.0
+	float_number dq 0.0
+	abs_float_number dq 0.0
+	temp_fi dq 0
+	
+	int_part dd 0
+	mul_value dd 10
+	temp_number dd 0
+	decimal_lenght dd 3
+	decimal_threshold dd 0.0001
+	decimal_scale dd 10
+
+
+
 	is_positive db 1
 	is_number db 0
 
@@ -49,7 +65,7 @@ section .data
 	FALSE equ 0
 
 	buffer:    times 201 db 0
-	inputed_nums: times 201 dd 0
+	inputed_nums: times 201 dq 0
 	
 	current_iteration db 0
 
@@ -68,66 +84,132 @@ section .bss
 
 section .text
 
-	print_number:
+
+	print_float:
+
+		; esi =  counter of how many chars the string will have
+		; edi = pointer to the buffer where the string will lice
 
 		xor ecx, ecx                
 		xor edx, edx
 		xor edi, edi
 		xor esi, esi
-			
-    	mov ebx, 10
-		mov edi, buffer   		   ; <- load our buffer into ebx
-    	                 
-		; if the number is positive, then jump to immediately converting it
-		cmp eax, 0
-		jnl .loop_push_stack
 
-		; if not positive, make it positve as the rest of the code only works with positve integers, then
-		; add a '-' at the start of the string, because the number is meant to be negative
-		neg eax
-		mov [edi], '-'
-		inc edi
-
-		.loop_push_stack:
-
-		    xor edx, edx    	   ; clear it after we store it or we blow up
-			div ebx    	           ; divide eax by 10
-			push edx    		   ; push into the stack the leftover which is in edx	   
-			   
-			inc ecx    	           ; <- increment the counter
-	
-			cmp eax, 0    	       ; <- compare the result of the division to 0		
-			jne .loop_push_stack    ; <- if its not zero, continue
-			
-	    mov esi, ecx               ; <- save our counter into a general porpuse register for printing
-
-		mov edx, [is_positive]
-		cmp edx, FALSE
-		jne .loop_pop_stack
+		mov edi, buffer	
+		mov dword [temp_number], edx
+    
 		
-		inc esi
-		  
-		.loop_pop_stack:
-		    
-			pop edx    			   ; <- pop our data back from the stack
-			    
-			add edx, '0'           ; <- convert to ascii    
-			mov byte [edi], dl     ; <- puts the converted digit into the buffer at the ebx position
+		movzx ecx, byte [current_iteration]					
+		fld qword [inputed_nums + ecx*8]
+		xor ecx, ecx
+		
+    	                 
+		xor edx, edx
+		mov [temp_number], edx
+		
+
+		.load_int_part:
+
+			fld st0
+			fisttp dword [int_part] ; store the trucated integer part (st0)
+			fild dword [int_part] ; load it back
+			fsubp st1, st0
 			
-			inc edi    		       ; <- increment the position of the buffer, (so we put the next converted number there)
-			dec ecx                ; <- decrement the loop counter
+			xor eax, eax
+			xor edx, edx
+
+			mov eax, dword [int_part]
+
+			mov ebx, 10
+			xor ecx, ecx
+
+			cmp eax, 0
+			jnl .loop_convert_int
+
+		.negate_value:
+
+			fabs  ; makes the decimal part positive
+			neg eax ; negates the interger part, so it becomes negative
+			mov [edi], '-'
+			inc edi
+			inc esi
 			
-			jne .loop_pop_stack     ; <- checks the zero flag of the instruction before it, if not equal (to zero), continue
+		.loop_convert_int:
 
-		; adds a null terminator at the end	
-		inc edi
-		mov [edi], 0
+		    xor edx, edx ; clear it after we store it or we blow up
+			div ebx ; div ebx by eax
+			
+			add edx, '0'     	           
+			push edx 
+			inc ecx 
+			
+			cmp eax, 0    	         ; <- compare the result of the division to 0		
+			jne .loop_convert_int    ; <- if its not zero, continue
 
-		inc esi                    ; <- needed because we can have the additional '-' char at the start, so we need to account for it
-	    mov ecx, buffer    		   ; <- move our buffer to ecx so we can print it
-	    print_str ecx, esi
+		.loop_str_int_part:
 
-	ret
+			pop edx
+			inc esi
+			mov [edi], edx
+			inc edi
+					
+			dec ecx
+
+			cmp ecx, 0
+			jne .loop_str_int_part
+			
+		.add_period:
+
+			xor edx, edx
+			mov edx, '.'
+
+			inc edi
+			mov [edi], edx
+			inc esi
+
+			xor ebx, ebx
+				
+		.loop_convert_fraction:
+
+			fild dword [mul_value] ; mul value = 10 
+			fmulp st1, st0; our mul_value gets popped
+			fld st0 ; could use this + fisttp right after
+			fisttp dword [temp_number]
+			fild dword [temp_number]
+			
+			mov edx, dword [temp_number]
+			add edx, '0'
+
+			inc edi
+			mov [edi], edx
+			inc esi
+
+		
+			xor edx, edx
+			mov [temp_number], edx
+
+			inc ebx
+			cmp ebx, 2
+			ja .add_null_terminator
+						
+			fsubp st1, st0
+			fabs
+			
+			fld dword [decimal_threshold]
+			fcomip st0, st1
+			jb .loop_convert_fraction
+
+		.add_null_terminator:
+		
+			inc edi
+			inc esi
+			mov [edi], 0 ; 0 is the actual null terminator
+			
+		.print_buffer:
+	 
+	    	print_str buffer, esi
+
+		ret
 
 
 	conv_str_to_int:
@@ -169,6 +251,9 @@ section .text
 						
 						inc esi
 
+						cmp bl, '.'
+						je .handle_fractional
+
 						sub bl, '0'	
 						cmp bl, 9
 						ja .end_loop
@@ -187,6 +272,38 @@ section .text
 						; we can add ebx (which only contains the digit to eax) slowly building the stringh
 						add eax, ebx				
 						jmp .conv_loop
+						
+					.handle_fractional:
+
+						xor ebx, ebx
+						mov bl, byte [esi]
+						inc esi
+
+						cmp bl, 0
+						je .end_loop
+
+						sub bl, '0'
+						
+						cmp bl, 9
+						ja .end_loop
+								
+						mov [temp_number], ebx
+
+						fild dword [temp_number]
+						fild dword [decimal_scale]
+						fdivp ; divides the two above
+						
+						fld qword [float_number] 
+						faddp 
+						fstp qword [float_number]
+
+						xor edi, edi
+						mov edi, [decimal_scale]
+						imul edi, 10
+						mov [decimal_scale], edi
+
+						jmp .handle_fractional	
+			
 
 				.end_loop:
 
@@ -195,28 +312,32 @@ section .text
 					cmp edi, TRUE
 					jne .end_store_number
 
-
 					.store_number:
 
-						; increment the current iteration of the array
+						; store the number into the array	
+						mov dword [int_part], eax
+						xor eax, eax
+						
+						fld qword [float_number]
+						fild dword [int_part]
+
+						faddp ; pops int part
+
+						.should_negate:
+						
 						xor edi, edi
 						movzx edi, byte [is_positive]
 						cmp edi, FALSE
-						jne .store
-						
-					.neg_number:
+						jne .store_and_continue
 
-						cmp eax, 0
-						jl .store
-						neg eax
-						mov byte [is_positive], 1
-							
-					.store:
-					
-						; store the number into the array	
-						movzx ecx, byte [current_iteration]
-						mov [inputed_nums + ecx*4], eax
-						xor eax, eax
+						.negate:
+						
+						fchs ; negates it if it should negative
+						
+						.store_and_continue:
+						
+						movzx ecx, byte [current_iteration]					
+						fstp qword [inputed_nums + ecx*8]
 
 						; mark it as false now
 						movzx edi, byte [is_number]
@@ -227,7 +348,7 @@ section .text
 						xor ecx, ecx
 						movzx ecx, byte [current_iteration]
 						inc ecx
-						mov [current_iteration], cl
+						mov [current_iteration], ecx
 
 						; if we should sub the current value with the current one, do it
 						movzx edi, byte [should_sub]
@@ -236,6 +357,13 @@ section .text
 						
 					.end_store_number:
 
+					xor edi, edi
+					mov [int_part], edi
+
+					; have to clear it one 32 bit register at a time
+					mov [float_number], edi
+					mov [float_number+4], edi
+					
 
 					cmp bl, 0 ; zero signifies the end of the string
 					je .end_nextchar
@@ -248,6 +376,8 @@ section .text
 					cmp bl, '-'
 					je .negative
 
+
+				
 			.sub_previous_and_current:
 
 				xor eax, eax
@@ -256,25 +386,27 @@ section .text
 				
 				movzx ecx, byte [current_iteration]
 				dec ecx
-				
-				dec ecx
-				mov eax, [inputed_nums + ecx*4]
 
-				inc ecx ; go back one unit into the array of converted numbers
-				mov edx, [inputed_nums + ecx*4]
-			
-				; result will now be in eax, which handle_whitespace will put it
-				; int the next location
-				sub eax, edx
+				; load the last 2 numbers in the inputed_nums list
+				; in the fpu stack
 
-				.store_and_exit:
+ 				dec ecx
+				fld qword [inputed_nums + ecx*8]
 				
-				; store the number into the array	
-				movzx ecx, byte [current_iteration]
-				mov [inputed_nums + ecx*4], eax
-				xor eax, eax
-				inc ecx
-				mov [current_iteration], cl
+				inc ecx 
+				fld qword [inputed_nums + ecx*8]
+				
+				; subract the two and pop the most recent one
+				fsubp st1, st0
+				
+			.store_and_exit:
+
+				inc ecx  	
+				fstp qword [inputed_nums + ecx*8]
+
+				inc ecx 
+				mov [current_iteration], ecx
+				xor ecx, ecx
 											
 				; set the flag to false
 				xor edi, edi
@@ -287,7 +419,7 @@ section .text
 				
 				; return to the main loop
 				jmp .nextchar
-			
+
 			.handle_whitespace:
 
 				jmp .nextchar			
@@ -301,16 +433,15 @@ section .text
 				cmp byte [esi], ' '
 				jne .mark_as_neg
 
-
 				mov byte [should_sub], TRUE
 				jmp .nextchar
 
-				.mark_as_neg:
+			.mark_as_neg:
 						
-					xor edi, edi
-					mov byte [is_positive], 0
+				xor edi, edi
+				mov byte [is_positive], 0
 
-					jmp .nextchar	
+				jmp .nextchar	
 					 
 			.error:
 	
@@ -322,10 +453,7 @@ section .text
 			xor ecx, ecx
 			movzx ecx, byte [current_iteration]
 			dec ecx ; dec due to difference of position x lenght of arrays
-
-			mov eax, [inputed_nums + ecx*4]
-			
-			xor edi, edi
+			mov [current_iteration], ecx
 			ret
 
 
@@ -378,8 +506,6 @@ _start:
 	print_str str_welcome1, str_welcome_len1
 	
 	call check_u_expression
-
-	mov eax, [u_n1]
-	call print_number
+	call print_float
 
 	exit_program
