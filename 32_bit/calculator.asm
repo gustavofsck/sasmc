@@ -20,6 +20,21 @@
     int   80h
 %endmacro
 
+%macro store_and_exit_fnct 1
+
+	inc ecx  	
+	fstp qword [inputed_nums + ecx*8]
+
+	inc ecx 
+	mov [current_iteration], ecx
+	xor ecx, ecx
+											
+	; set the flag to false
+	xor edi, edi
+	mov [%1], edi
+	
+%endmacro
+
 section .data
 
 	str_welcome1 db 'Welcome to ASMC',0Ah,0Ah,'ASSEMBLY CALCULATOR ',0Ah,0
@@ -34,7 +49,7 @@ section .data
 
 
 
-	scale dq 1000.0
+	scale dq 1000.0 ; scale of how many decimal digits to print, 10 = 1, 100 = 2, 1000 = 3
 	float_number dq 0.0
 	abs_float_number dq 0.0
 	temp_fi dq 0
@@ -64,7 +79,9 @@ section .data
 	TRUE equ 1
 	FALSE equ 0
 
+	; buffer for print_float
 	buffer:    times 201 db 0
+	; vector for conv_str_to_int
 	inputed_nums: times 201 dq 0
 	
 	current_iteration db 0
@@ -73,13 +90,10 @@ section .data
 
 section .bss
 
-	; 32 bits word to hold eax (converted u_str)
-	u_n1 resd 1
-	u_n2 resd 1
-
 	counter resb 1
 	unit resb 1
 
+	; where the user prompt will be stored, under check_u_expression
 	ustr resb 200
 
 section .text
@@ -172,8 +186,8 @@ section .text
 		.loop_convert_fraction:
 
 			fild dword [mul_value] ; mul value = 10 
-			fmulp st1, st0; our mul_value gets popped
-			fld st0 ; could use this + fisttp right after
+			fmulp st1, st0
+			fld st0 
 			fisttp dword [temp_number]
 			fild dword [temp_number]
 			
@@ -287,7 +301,7 @@ section .text
 						cmp bl, 9
 						ja .end_loop
 								
-						mov [temp_number], ebx
+						mov dword [temp_number], ebx
 
 						fild dword [temp_number]
 						fild dword [decimal_scale]
@@ -304,7 +318,6 @@ section .text
 
 						jmp .handle_fractional	
 			
-
 				.end_loop:
 
 					; if not jump ahead and dont store it
@@ -312,7 +325,10 @@ section .text
 					cmp edi, TRUE
 					jne .end_store_number
 
-					.store_number:
+					; reset decimal scale back to 10
+					mov edi, 10
+					mov dword [decimal_scale], edi
+				.store_number:
 
 						; store the number into the array	
 						mov dword [int_part], eax
@@ -323,18 +339,18 @@ section .text
 
 						faddp ; pops int part
 
-						.should_negate:
+					.should_negate:
 						
 						xor edi, edi
 						movzx edi, byte [is_positive]
 						cmp edi, FALSE
 						jne .store_and_continue
 
-						.negate:
+					.negate:
 						
 						fchs ; negates it if it should negative
 						
-						.store_and_continue:
+					.store_and_continue:
 						
 						movzx ecx, byte [current_iteration]					
 						fstp qword [inputed_nums + ecx*8]
@@ -354,8 +370,12 @@ section .text
 						movzx edi, byte [should_sub]
 						cmp edi, TRUE
 						je .sub_previous_and_current
+
+						movzx edi, byte [should_add]
+						cmp edi, TRUE
+						je .add_previous_and_current
 						
-					.end_store_number:
+				.end_store_number:
 
 					xor edi, edi
 					mov [int_part], edi
@@ -363,8 +383,8 @@ section .text
 					; have to clear it one 32 bit register at a time
 					mov [float_number], edi
 					mov [float_number+4], edi
-					
 
+					
 					cmp bl, 0 ; zero signifies the end of the string
 					je .end_nextchar
 
@@ -376,41 +396,50 @@ section .text
 					cmp bl, '-'
 					je .negative
 
+					cmp bl, '+'
+					je .positive
 
-				
-			.sub_previous_and_current:
-
-				xor eax, eax
-				xor edx, edx				
-				xor ecx, ecx
+			.add_previous_and_current:
 				
 				movzx ecx, byte [current_iteration]
 				dec ecx
 
 				; load the last 2 numbers in the inputed_nums list
 				; in the fpu stack
-
  				dec ecx
+				fld qword [inputed_nums + ecx*8]				
+				inc ecx 
 				fld qword [inputed_nums + ecx*8]
 				
+				; add the two and pop the most recent one
+				faddp st1, st0
+
+				store_and_exit_fnct should_add
+
+				xor edi, edi
+				mov edi, [end_of_str_flag]
+				cmp edi, TRUE
+				je .end_nextchar
+				
+				; return to the main loop
+				jmp .nextchar			
+				
+			.sub_previous_and_current:
+				
+				movzx ecx, byte [current_iteration]
+				dec ecx
+
+				; load the last 2 numbers in the inputed_nums list
+				; in the fpu stack
+ 				dec ecx
+				fld qword [inputed_nums + ecx*8]			
 				inc ecx 
 				fld qword [inputed_nums + ecx*8]
 				
 				; subract the two and pop the most recent one
 				fsubp st1, st0
 				
-			.store_and_exit:
-
-				inc ecx  	
-				fstp qword [inputed_nums + ecx*8]
-
-				inc ecx 
-				mov [current_iteration], ecx
-				xor ecx, ecx
-											
-				; set the flag to false
-				xor edi, edi
-				mov [should_sub], edi
+				store_and_exit_fnct should_sub
 
 				xor edi, edi
 				mov edi, [end_of_str_flag]
@@ -422,6 +451,18 @@ section .text
 
 			.handle_whitespace:
 
+				jmp .nextchar			
+
+			.positive:
+
+				; marks the is number flag as false
+				xor edi, edi
+				mov [is_number], edi
+				
+				cmp byte [esi], ' '
+				jne .error
+
+				mov byte [should_add], TRUE
 				jmp .nextchar			
 						
 			.negative:
@@ -459,45 +500,38 @@ section .text
 
 	check_u_expression:
 
-		; clear all registers for use
-		xor ecx, ecx
 		xor eax, eax
-		xor ebx, ebx
-		xor esi, esi
-		xor edi, edi 
-		xor edx, edx
-					
-			.check_number:
+		xor ecx, ecx
+			
+		.check_number:
 						
-				; call read and pass our string and lenght	
-				read_stdin ustr, 200
+			; call read and pass our string and lenght	
+			read_stdin ustr, 200
 				
-				; ecx = ptr to buffer (beggining of the string) eax = number of bytes read (doing this equation gives us str lenght)
-				mov byte [ecx + eax - 1], 0 ; <- null terminate the ustr by replacing \n with 0
+			; ecx = ptr to buffer (beggining of the string) eax = number of bytes read (doing this equation gives us str lenght)
+			mov byte [ecx + eax - 1], 0 ; <- null terminate the ustr by replacing \n with 0
 
-				; mov the user input to esi and call conv_str_to_int
-				; to convert it into a number not a string
-				mov esi, ustr
-				call conv_str_to_int
+			; mov the user input to esi and call conv_str_to_int
+			; to convert it into a number not a string
+			mov esi, ustr
+			call conv_str_to_int
 
-				; compare conv_str_to_int return value
-				mov ebx, -1
-				; if edi is not -1, but instead of a converted positive nubmer, goto valid 
-				cmp edi, ebx
-				jne .valid 
+			; compare conv_str_to_int return value
+			mov ebx, -1
+			; if edi is not -1, but instead of a converted positive nubmer, goto valid 
+			cmp edi, ebx
+			jne .valid 
 							
-				; if not digit, tell user input was not valid, and iterate again
-				print_str str_input_not_number, str_input_not_number_len
+			; if not digit, tell user input was not valid, and iterate again
+			print_str str_input_not_number, str_input_not_number_len
 
-				jmp .check_number
+			jmp .check_number
 		
-			.valid: 
+		.valid: 
 			
-				mov [u_n1], eax										
-			
-		.end_check_u_expression:
-			
-			ret
+			ret									
+
+
 
 global _start
 
