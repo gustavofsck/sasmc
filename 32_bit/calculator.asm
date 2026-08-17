@@ -35,6 +35,33 @@
 	
 %endmacro
 
+%macro handle_operands 1
+
+	xor edi, edi
+	mov [is_number], edi
+				
+	cmp byte [esi], ' '
+	jne .error
+
+	mov byte [%1], TRUE
+	jmp .nextchar			
+
+%endmacro
+
+%macro load_two_numbers 0
+
+	movzx ecx, byte [current_iteration]
+	dec ecx
+
+	; load the last 2 numbers in the inputed_nums list
+	; in the fpu stack
+ 	dec ecx
+	fld qword [inputed_nums + ecx*8]				
+	inc ecx 
+	fld qword [inputed_nums + ecx*8]
+
+%endmacro
+
 section .data
 
 	str_welcome1 db 'Welcome to ASMC',0Ah,0Ah,'ASSEMBLY CALCULATOR ',0Ah,0
@@ -328,6 +355,7 @@ section .text
 					; reset decimal scale back to 10
 					mov edi, 10
 					mov dword [decimal_scale], edi
+					
 				.store_number:
 
 						; store the number into the array	
@@ -374,7 +402,15 @@ section .text
 						movzx edi, byte [should_add]
 						cmp edi, TRUE
 						je .add_previous_and_current
-						
+
+						movzx edi, byte [should_mul]
+						cmp edi, TRUE
+						je .mul_previous_and_current
+
+						movzx edi, byte [should_div]
+						cmp edi, TRUE
+						je .div_previous_and_current						
+											
 				.end_store_number:
 
 					xor edi, edi
@@ -384,7 +420,6 @@ section .text
 					mov [float_number], edi
 					mov [float_number+4], edi
 
-					
 					cmp bl, 0 ; zero signifies the end of the string
 					je .end_nextchar
 
@@ -399,18 +434,52 @@ section .text
 					cmp bl, '+'
 					je .positive
 
-			.add_previous_and_current:
-				
-				movzx ecx, byte [current_iteration]
-				dec ecx
+					cmp bl, '*'
+					je .multiply
 
-				; load the last 2 numbers in the inputed_nums list
-				; in the fpu stack
- 				dec ecx
-				fld qword [inputed_nums + ecx*8]				
-				inc ecx 
-				fld qword [inputed_nums + ecx*8]
+					cmp bl, '/'
+					je .divide
+
+			.div_previous_and_current:
 				
+				load_two_numbers
+								
+				; add the two and pop the most recent one
+				fdivp st1, st0
+
+				store_and_exit_fnct should_add
+
+				xor edi, edi
+				mov edi, [end_of_str_flag]
+				cmp edi, TRUE
+				je .end_nextchar
+				
+				; return to the main loop
+				jmp .nextchar			
+
+
+			.mul_previous_and_current:
+			
+				load_two_numbers
+				
+				; add the two and pop the most recent one
+				fmulp st1, st0
+
+				store_and_exit_fnct should_add
+
+				xor edi, edi
+				mov edi, [end_of_str_flag]
+				cmp edi, TRUE
+				je .end_nextchar
+				
+				; return to the main loop
+				jmp .nextchar			
+
+
+			.add_previous_and_current:
+			
+				load_two_numbers
+								
 				; add the two and pop the most recent one
 				faddp st1, st0
 
@@ -426,15 +495,7 @@ section .text
 				
 			.sub_previous_and_current:
 				
-				movzx ecx, byte [current_iteration]
-				dec ecx
-
-				; load the last 2 numbers in the inputed_nums list
-				; in the fpu stack
- 				dec ecx
-				fld qword [inputed_nums + ecx*8]			
-				inc ecx 
-				fld qword [inputed_nums + ecx*8]
+				load_two_numbers
 				
 				; subract the two and pop the most recent one
 				fsubp st1, st0
@@ -451,20 +512,20 @@ section .text
 
 			.handle_whitespace:
 
-				jmp .nextchar			
+			jmp .nextchar			
 
+			.divide:
+
+			handle_operands should_div
+
+			.multiply:
+
+			handle_operands should_mul
+		
 			.positive:
-
-				; marks the is number flag as false
-				xor edi, edi
-				mov [is_number], edi
-				
-				cmp byte [esi], ' '
-				jne .error
-
-				mov byte [should_add], TRUE
-				jmp .nextchar			
-						
+		
+			handle_operands should_add
+										
 			.negative:
 
 				; marks the is number flag as false
@@ -530,8 +591,6 @@ section .text
 		.valid: 
 			
 			ret									
-
-
 
 global _start
 
